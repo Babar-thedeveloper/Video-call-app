@@ -10,7 +10,7 @@ return socket;
 export const SocketProvider=(props)=>{
 
 const socket = useMemo(
-  () => io("http://192.168.100.143:8000"),
+  () => io("http://localhost:8000"),
   []
 );
 
