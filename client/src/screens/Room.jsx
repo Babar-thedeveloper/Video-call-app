@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useSocket } from "../context/SocketProvider";
 import { useCallback } from "react";
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTheme } from "../context/ThemeProvider";
 import { Button, IconButton, Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, ModalActions, Card } from "../components";
 import peer from "../servise/peer";
@@ -13,17 +13,26 @@ const RoomPage = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const params = useParams();
+  const roomId = params?.roomId || params?.room || params?.id || null;
   const [remoteSocketId, setRemotesocketId] = useState(() => location?.state?.remoteSocketId || null);
   const [myStream, setMyStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
   const [callState, setCallState] = useState("idle");
   const [incomingCall, setIncomingCall] = useState(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessage, setChatMessage] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [chatToast, setChatToast] = useState(null);
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerCleanupRef = useRef(null);
   const myStreamRef = useRef(null);
+  const chatListRef = useRef(null);
+  const chatToastTimerRef = useRef(null);
 
   const handleUserJoined = useCallback(({ email, id }) => {
     console.log(`${email} joined the room`);
@@ -133,6 +142,30 @@ const RoomPage = () => {
     }
   }, []);
 
+  const handleChatMessage = useCallback((payload) => {
+    if (!payload) return;
+    setChatMessages((prev) => prev.concat(payload));
+
+    const isMine = payload?.from && payload?.from === socket?.id;
+    if (!isMine && !chatOpen) {
+      setUnreadCount((c) => c + 1);
+      setChatToast(payload);
+      if (chatToastTimerRef.current) clearTimeout(chatToastTimerRef.current);
+      chatToastTimerRef.current = setTimeout(() => {
+        setChatToast(null);
+        chatToastTimerRef.current = null;
+      }, 2600);
+    }
+  }, [socket?.id, chatOpen]);
+
+  const sendChatMessage = useCallback(() => {
+    if (!roomId) return;
+    const text = chatMessage.trim();
+    if (!text) return;
+    socket.emit("chat:message", { room: roomId, message: text });
+    setChatMessage("");
+  }, [socket, roomId, chatMessage]);
+
   const startCall = useCallback(async () => {
     if (!remoteSocketId) return;
     if (callState !== "idle") return;
@@ -229,6 +262,7 @@ const RoomPage = () => {
     socket.on("call:rejected", handleCallRejected);
     socket.on("call:ended", handleCallEnded);
     socket.on("peer:ice-candidate", handleIceCandidate);
+    socket.on("chat:message", handleChatMessage);
 
     return () => {
       socket.off("user:joined", handleUserJoined);
@@ -238,8 +272,22 @@ const RoomPage = () => {
       socket.off("call:rejected", handleCallRejected);
       socket.off("call:ended", handleCallEnded);
       socket.off("peer:ice-candidate", handleIceCandidate);
+      socket.off("chat:message", handleChatMessage);
     };
-  }, [socket, handleUserJoined, handleRoomUsers, handleIncomingCall, handleCallAccepted, handleCallRejected, handleCallEnded, handleIceCandidate]);
+  }, [socket, handleUserJoined, handleRoomUsers, handleIncomingCall, handleCallAccepted, handleCallRejected, handleCallEnded, handleIceCandidate, handleChatMessage]);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    const el = chatListRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [chatOpen, chatMessages.length]);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    setUnreadCount(0);
+    setChatToast(null);
+  }, [chatOpen]);
 
   useEffect(() => {
     if (myVideoRef.current && myStream) {
@@ -327,6 +375,20 @@ const RoomPage = () => {
             >
               Join another room
             </Button>
+            <button
+              type="button"
+              onClick={() => setChatOpen((v) => !v)}
+              className={`relative inline-flex items-center justify-center rounded-full border border-transparent px-3 py-2 text-xs sm:text-sm transition-all ${unreadCount > 0 && !chatOpen ? "animate-pulse" : ""}`}
+            >
+              <span className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 shadow-sm hover:shadow-md transition-all duration-200">
+                Chat
+              </span>
+              {unreadCount > 0 && !chatOpen && (
+                <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--danger)] px-1.5 text-[11px] font-semibold text-white shadow">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </button>
             <div className="flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-1.5">
               <div className={`h-2 w-2 rounded-full ${getStatusColor()} animate-pulse`} />
               <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{getStatusText()}</span>
@@ -348,6 +410,124 @@ const RoomPage = () => {
             </button>
           </div>
         </motion.div>
+
+        <AnimatePresence>
+          {chatOpen && (
+            <>
+              <motion.button
+                className="fixed inset-0 z-30 bg-black/30"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                onClick={() => setChatOpen(false)}
+                aria-label="Close chat"
+              />
+
+              <motion.div
+                className="fixed z-40 w-[calc(100%-2rem)] sm:w-[360px] left-4 sm:left-auto sm:right-6 bottom-4 sm:bottom-6"
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 18 }}
+                transition={{ duration: 0.25 }}
+              >
+                <Card className="shadow-2xl">
+                  <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border-color)]">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold">Chat</div>
+                      <div className="text-xs text-[var(--text-secondary)] truncate">
+                        Room: {roomId || "-"}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setChatOpen(false)}
+                      className="rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-xs"
+                      type="button"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div
+                    ref={chatListRef}
+                    className="max-h-[45svh] sm:max-h-[420px] overflow-auto px-4 py-3 space-y-2"
+                  >
+                    {chatMessages.length === 0 ? (
+                      <div className="text-xs text-[var(--text-secondary)]">
+                        No messages yet. Say hi.
+                      </div>
+                    ) : (
+                      chatMessages.map((m, idx) => {
+                        const mine = m?.from === socket?.id;
+                        return (
+                          <div key={idx} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                            <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs border ${mine ? "bg-[var(--bg-tertiary)] border-[var(--border-color)]" : "bg-[var(--bg-secondary)]/70 border-[var(--border-color)]"}`}>
+                              <div className="text-[11px] font-semibold text-[var(--text-tertiary)]">
+                                {mine ? "You" : (m?.fromEmail || m?.from || "User")}
+                              </div>
+                              <div className="mt-1 whitespace-pre-wrap break-words text-[var(--text-primary)]">
+                                {m?.message}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="px-4 py-3 border-t border-[var(--border-color)]">
+                    <div className="flex items-end gap-2">
+                      <textarea
+                        value={chatMessage}
+                        onChange={(e) => setChatMessage(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            sendChatMessage();
+                          }
+                        }}
+                        rows={2}
+                        placeholder="Type a message…"
+                        className="w-full resize-none rounded-2xl border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none"
+                      />
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={sendChatMessage}
+                        disabled={!roomId || !chatMessage.trim()}
+                        className="rounded-full"
+                      >
+                        Send
+                      </Button>
+                    </div>
+                    <div className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+                      Enter to send, Shift+Enter for new line.
+                    </div>
+                  </div>
+                </Card>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {!!chatToast && !chatOpen && (
+            <motion.div
+              className="fixed z-50 left-4 right-4 sm:left-auto sm:right-6 top-4 sm:top-6 w-auto sm:w-[360px]"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 backdrop-blur-xl px-4 py-3 shadow-2xl">
+                <div className="text-[11px] font-semibold text-[var(--text-tertiary)]">New message</div>
+                <div className="mt-1 text-xs text-[var(--text-primary)] truncate">
+                  <span className="font-semibold">{chatToast?.fromEmail || "User"}:</span> {chatToast?.message}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <motion.div
           className="relative flex-1 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 shadow-2xl min-h-[68svh] sm:min-h-0"

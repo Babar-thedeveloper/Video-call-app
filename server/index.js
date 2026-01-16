@@ -51,12 +51,26 @@ io.on("connection", (socket) => {
     io.to(to).emit("call:ended", { from: socket.id });
   });
 
+  socket.on("chat:message", ({ room, message }) => {
+    if (!room) return;
+    if (typeof message !== "string") return;
+    const trimmed = message.trim();
+    if (!trimmed) return;
+
+    const fromEmail = socketIdToEmailMap.get(socket.id);
+    io.to(room).emit("chat:message", {
+      from: socket.id,
+      fromEmail,
+      message: trimmed,
+      ts: Date.now(),
+    });
+  });
+
   socket.on("peer:ice-candidate", ({ to, candidate }) => {
     io.to(to).emit("peer:ice-candidate", { from: socket.id, candidate });
   });
 
 });
-
 
 io.listen(8000);
 console.log("Socket server running on port 8000");
