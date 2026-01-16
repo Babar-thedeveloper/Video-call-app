@@ -1,18 +1,12 @@
-import "./App.css";
 import { Routes, Route } from "react-router-dom";
-import LobbyScreen from "./screens/lobby";
+import LobbyScreen from "./screens/Lobby";
 import RoomPage from "./screens/Room";
 function App() {
   return (
-    
-      <div className="flex justify-center">
-        <Routes>
-          <Route path="/" element={<LobbyScreen />} />
-          <Route path="/room/:roomId" element={<RoomPage/>} />
-          
-        </Routes>
-      </div>
-    
+    <Routes>
+      <Route path="/" element={<LobbyScreen />} />
+      <Route path="/room/:roomId" element={<RoomPage />} />
+    </Routes>
   );
 }
 export default App;
