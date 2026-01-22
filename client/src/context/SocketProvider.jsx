@@ -1,22 +1,23 @@
-import React, { createContext ,useMemo, useContext} from "react";
+import React, { createContext, useMemo, useContext } from "react";
 import { io } from "socket.io-client";
+
 const SocketContext = createContext(null);
 
-export const useSocket=()=>{
-const socket =useContext(SocketContext);
-return socket;
-}
+export const useSocket = () => {
+  return useContext(SocketContext);
+};
 
-export const SocketProvider=(props)=>{
+export const SocketProvider = ({ children }) => {
+  const socket = useMemo(() => {
+    return io(import.meta.env.VITE_BACKEND_URL, {
+      transports: ["websocket"],
+    });
+  }, []);
 
-const socket = useMemo(
-  () => io("http://localhost:8000"),
-  []
-);
-
-return (
+  return (
     <SocketContext.Provider value={socket}>
-        {props.children}
+      {children}
     </SocketContext.Provider>
-)
-}
+  );
+};
+
