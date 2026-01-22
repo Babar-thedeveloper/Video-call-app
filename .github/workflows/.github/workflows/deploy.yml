@@ -1,0 +1,36 @@
+name: Deploy Video Call App
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 46.62.128.34 >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        run: |
+          ssh mohsin@46.62.128.34 << 'EOF'
+            cd /var/www/Video-call-app
+            git pull origin main
+
+            cd server
+            npm install
+            pm2 restart videocall-backend || pm2 start index.js --name videocall-backend
+
+            cd ../client
+            npm install
+            npm run build
+          EOF
